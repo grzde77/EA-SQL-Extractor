@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ea-sql-executor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ea-sql-executor
+  template:
+    metadata:
+      labels:
+        app: ea-sql-executor
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/ea/sql-executor:1.0
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: ea-sql-executor-secret
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
