@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import pyodbc
 import os
@@ -14,34 +14,44 @@ FORBIDDEN = re.compile(
 class SQLRequest(BaseModel):
     query: str
 
-def get_conn():
-    # W OpenShift weźmiemy to z Secret jako EA_SQL_CONN_STR
-    return pyodbc.connect(os.environ["EA_SQL_CONN_STR"], timeout=5)
+def conn_str() -> str:
+    # Option 1: full connection string from env (simplest)
+    if os.environ.get("EA_SQL_CONN_STR"):
+        return os.environ["EA_SQL_CONN_STR"]
+
+    # Option 2: build from parts
+    server = os.environ["EA_DB_SERVER"]      # e.g. mssql.example.local,1433
+    db = os.environ["EA_DB_NAME"]            # e.g. EA_DB
+    user = os.environ["EA_DB_USER"]
+    pwd = os.environ["EA_DB_PASSWORD"]
+
+    # Encrypt/Trust settings depend on your SQL Server config
+    return (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER={server};"
+        f"DATABASE={db};"
+        f"UID={user};"
+        f"PWD={pwd};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=yes;"
+    )
 
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
 
 @app.post("/ea/sql")
-def run_sql(req: SQLRequest, x_api_key: str = Header(default=None)):
-    # prosta autoryzacja (polecane)
-    expected = os.environ.get("API_KEY")
-    if expected and x_api_key != expected:
-        raise HTTPException(401, "Unauthorized")
-
+def run_sql(req: SQLRequest):
     sql = (req.query or "").strip()
 
-    # bezpieczeństwo: tylko SELECT
+    # Security: only SELECT
     if not sql.lower().startswith("select"):
         raise HTTPException(400, "Only SELECT allowed")
     if FORBIDDEN.search(sql):
         raise HTTPException(400, "Forbidden SQL keyword detected")
 
-    # opcjonalnie: limit wyników na backendzie (jeśli LLM zapomni TOP)
-    # możesz to wymuszać regexem, ale na start zostawiamy walidację w Pipe + tu tylko guard.
-
     try:
-        conn = get_conn()
+        conn = pyodbc.connect(conn_str(), timeout=5)
         cur = conn.cursor()
         cur.execute(sql)
 
